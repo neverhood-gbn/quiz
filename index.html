@@ -68,7 +68,9 @@ table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;text-align:left;
 <section id="s-wait" class="card hide">
   <div class="hero">⏳</div>
   <h2 style="text-align:center">Salle d'attente</h2>
-  <p class="mut" style="text-align:center">Bienvenue <b id="wPseudo"></b> ! Inscription validée.<br>Début du quiz : 21/11 à 19h00.</p>
+  <div style="background:var(--ok);color:#06241a;padding:12px;border-radius:12px;font-weight:700;text-align:center;margin:8px 0">✅ Inscription effectuée avec succès !</div>
+  <p class="mut" style="text-align:center">Bienvenue <b id="wPseudo"></b> ! Tu es dans la salle d'attente : le quiz démarre à la fin du compte à rebours (21/11 à 19h00).</p>
+  <p class="err" id="wLock" style="text-align:center"></p>
   <div class="big" id="wCount">--:--:--</div>
   <button class="btn hide" id="wGo">⚔️ Lancer le quiz</button>
   <button class="btn ghost remindBtn">🔔 Me rappeler demain à 19h</button>
@@ -107,6 +109,7 @@ table{width:100%;border-collapse:collapse}td,th{padding:8px 6px;text-align:left;
   <h2>🛠️ Espace admin</h2>
   <p class="mut">Visible uniquement une fois connecté en admin.</p>
   <button class="btn" id="lockBtn">🔒 Bloquer / débloquer le classement</button>
+  <button class="btn" id="resetBtn" style="background:var(--ko)">🗑️ Réinitialiser le classement</button>
   <button class="btn" id="pubBtn">📣 Publier la liste définitive</button>
   <div class="mut" id="adminMsg"></div>
 </section>
@@ -197,7 +200,7 @@ init();
 /* ================= SALLE D'ATTENTE + RAPPEL ================= */
 let wt=null;
 function enterWaiting(){
-  show("wait");keep({waiting:true,me});$("wPseudo").textContent=me.pseudo;clearInterval(wt);
+  show("wait");keep({waiting:true,me});$("wPseudo").textContent=me.pseudo;$("wLock").textContent=cfg.locked?"🔒 Le classement est actuellement bloqué.":"";clearInterval(wt);
   const p=n=>String(n).padStart(2,"0");
   const tick=()=>{const ms=startT()-new Date();
     if(!TEST_MODE&&new Date()>endT()){clearInterval(wt);$("wCount").textContent="Quiz terminé";return}
@@ -207,11 +210,15 @@ function enterWaiting(){
   tick();wt=setInterval(tick,1000);
 }
 $("wGo").onclick=()=>{if(cfg.locked){$("wCount").textContent="Classement bloqué";return}beginQuiz()};
-async function remind(){
-  const d=QUIZ_DATE.replace(/-/g,""),st=new Date().toISOString().replace(/[-:]|\.\d{3}/g,"");
-  const ics=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//OtakuQuiz//FR","BEGIN:VEVENT","UID:quiz-"+d+"@otaku","DTSTAMP:"+st,"DTSTART:"+d+"T190000","DTEND:"+d+"T225900","SUMMARY:⚡ Otaku Quiz Night","DESCRIPTION:Connecte-toi avant 19h pour la salle d'attente.","BEGIN:VALARM","TRIGGER:-PT15M","ACTION:DISPLAY","DESCRIPTION:Otaku Quiz Night dans 15 min","END:VALARM","END:VEVENT","END:VCALENDAR"].join("\r\n");
-  try{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([ics],{type:"text/calendar"}));a.download="otaku-quiz.ics";a.click();return}catch(e){}
-  window.open("https://calendar.google.com/calendar/render?action=TEMPLATE&text="+encodeURIComponent("⚡ Otaku Quiz Night")+"&dates="+d+"T190000/"+d+"T225900","_blank");
+function remind(){
+  const d=QUIZ_DATE.replace(/-/g,""),title="⚡ Otaku Quiz Night",desc="Connecte-toi avant 19h pour la salle d'attente.";
+  if(/iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent)){
+    const st=new Date().toISOString().replace(/[-:]|\.\d{3}/g,"");
+    const ics=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//OtakuQuiz//FR","BEGIN:VEVENT","UID:quiz-"+d+"@otaku","DTSTAMP:"+st,"DTSTART:"+d+"T190000","DTEND:"+d+"T225900","SUMMARY:"+title,"DESCRIPTION:"+desc,"BEGIN:VALARM","TRIGGER:-PT15M","ACTION:DISPLAY","DESCRIPTION:Otaku Quiz Night dans 15 min","END:VALARM","END:VEVENT","END:VCALENDAR"].join("\r\n");
+    location.href=URL.createObjectURL(new Blob([ics],{type:"text/calendar"}));
+  }else{
+    window.open("https://calendar.google.com/calendar/render?action=TEMPLATE&text="+encodeURIComponent(title)+"&details="+encodeURIComponent(desc)+"&dates="+d+"T190000/"+d+"T225900","_blank");
+  }
 }
 document.querySelectorAll(".remindBtn").forEach(b=>b.onclick=remind);
 $("adminBtn").onclick=async e=>{e.preventDefault();
@@ -226,7 +233,6 @@ $("backHome").onclick=()=>show("rules");
 $("start").onclick=async()=>{
   const pseudo=$("pseudo").value.trim(),err=$("regErr");err.textContent="";
   if(!TEST_MODE&&new Date()>endT()){err.textContent="Le quiz est terminé (fermeture à 22h59).";return}
-  if(cfg.locked){err.textContent="Le classement est bloqué : plus personne ne peut répondre.";return}
   if(!/^[\w\-]{3,20}$/.test(pseudo)){err.textContent="Pseudo : 3–20 caractères (lettres, chiffres, _ ou -).";return}
   if(key(pseudo)==="monsieur_hunter"&&!isAdmin){err.textContent="Ce pseudo est réservé.";return}
   if(!db){err.textContent="Base de données indisponible.";return}
@@ -305,6 +311,14 @@ async function saveCsv(list){
 }
 /* ================= ADMIN ================= */
 $("lockBtn").onclick=async()=>{await db.doc("config/state").set({...cfg,locked:!cfg.locked});$("adminMsg").textContent=cfg.locked?"Classement débloqué.":"Classement bloqué 🔒"};
+$("resetBtn").onclick=async()=>{
+  if(!confirm("Supprimer TOUS les participants et leurs scores ? Action irréversible."))return;
+  try{const snap=await db.collection("players").get();
+    for(let i=0;i<snap.docs.length;i+=400){const b=db.batch();snap.docs.slice(i,i+400).forEach(d=>b.delete(d.ref));await b.commit()}
+    await db.doc("config/state").set({locked:false});
+    $("adminMsg").textContent="Classement réinitialisé ("+snap.docs.length+" participants supprimés).";
+  }catch(e){$("adminMsg").textContent="Échec de la réinitialisation."}
+};
 $("pubBtn").onclick=async()=>{
   const list=sorted().map(p=>({pseudo:p.pseudo,score:p.score||0}));
   await db.doc("config/state").set({...cfg,locked:true,final:list});$("adminMsg").textContent="Liste définitive publiée : les participants peuvent la télécharger.";
